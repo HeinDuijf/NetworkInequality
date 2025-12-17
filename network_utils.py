@@ -308,7 +308,6 @@ def generate_network_variant(
         if num_edges_to_remove > 0:
             edges_to_remove = random.sample(list(net_new.edges()), num_edges_to_remove)
             net_new.remove_edges_from(edges_to_remove)
-
     clustering_dict: dict = nx.clustering(net_new)
 
     # Add edges in neighborhoods

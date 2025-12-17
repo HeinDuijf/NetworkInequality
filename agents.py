@@ -71,7 +71,6 @@ class BetaAgent:
     - credences (np.ndarray): The agent's belief in each theory, initialized as the mean of beta distributions.
     - histories (bool): Whether to store the history of credences.
     - credences_history (list): A list storing past credences if histories are enabled.
-
     Methods:
     - __init__(self, id, bandit: Bandit, histories=False):
       Initializes the agent with given ID and an instance of the bandit environment.
@@ -121,7 +120,6 @@ class BetaAgent:
         """
         Selects the theory with the highest credence.
         If multiple theories have the same maximum credence, a random one is chosen.
-
         Returns:
         - best_theory_index (int): The index of the chosen theory.
         """
