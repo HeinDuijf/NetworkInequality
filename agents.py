@@ -3,6 +3,9 @@
 # from scipy.stats import beta
 from imports import *
 
+bad_theory_id: int = 0
+good_theory_id: int = 1
+
 
 class Bandit:
     """
@@ -48,11 +51,11 @@ class Bandit:
         Raises:
         - ValueError: If the index is not 0 or 1.
         """
-        if theory_index == 0:
+        if theory_index == bad_theory_id:
             n_success = rd.binomial(
                 n_experiments, self.p_bad_theory
             )  # np.random.binomial(n_experiments, self.p_bad_theory) #
-        elif theory_index == 1:
+        elif theory_index == good_theory_id:
             n_success = rd.binomial(n_experiments, self.p_good_theory)
         else:
             raise ValueError("Index must be 0 (bad theory) or 1 (good theory).")
@@ -95,7 +98,7 @@ class BetaAgent:
         self.bandit = bandit
         # this parameter is used if updating is done by sampling
         self.sampling_update = sampling_update
-        self.epsilon = epsilon
+        self.epsilon = epsilon  # parameter used for epsilon-greedy choice
         # Initializing Beta Agent
         prior_T1 = rd.uniform(0, 4, size=2)
         prior_T2 = rd.uniform(0, 4, size=2)
@@ -116,12 +119,12 @@ class BetaAgent:
             self.credences_history = []
             self.credences_history.append(self.credences)
 
-    def egreedy_choice(self):
+    def choice(self):
         """
         Selects the theory with the highest credence.
         If multiple theories have the same maximum credence, a random one is chosen.
         Returns:
-        - best_theory_index (int): The index of the chosen theory.
+        - chosen_theory_index (int): The index of the chosen theory.
         """
         if rd.rand() < self.epsilon:
             rd_index = rd.randint(len(self.credences))
@@ -129,8 +132,8 @@ class BetaAgent:
         else:
             max_value = np.max(self.credences)
             max_indices = np.where(self.credences == max_value)[0]
-            best_theory_index = rd.choice(max_indices)
-            return best_theory_index
+            chosen_theory_index = rd.choice(max_indices)
+            return chosen_theory_index
 
     def experiment(self, n_experiments: int):
         """
@@ -144,12 +147,12 @@ class BetaAgent:
         - n_success (int): The number of successful experiments.
         - n_failures (int): The number of failed experiments.
         """
-        theory_index = self.egreedy_choice()
+        theory_index = self.choice()
         n_success, n_experiments = self.bandit.experiment(theory_index, n_experiments)
         n_failures = n_experiments - n_success
         return theory_index, n_success, n_failures
 
-    def beta_update(self, theory_index, n_success, n_failures):
+    def update(self, theory_index, n_success, n_failures):
         """
         Updates the agent's belief using Bayesian updating based on observed successes and failures.
 
@@ -175,3 +178,38 @@ class BetaAgent:
 
         if self.histories:
             self.credences_history.append(new_credences)
+
+
+class BayesAgent:
+    def __init__(self, id, bandit):
+        self.id = id
+        self.bandit = bandit
+        self.credences = rd.uniform(0, 1)
+
+    def choice(self):
+        if self.credences > 0.5:
+            return good_theory_id
+        return bad_theory_id
+
+    def experiment(self, n_experiments: int):
+        if self.choice() == bad_theory_id:
+            return bad_theory_id, 0, 0
+
+        n_success, n_experiments = self.bandit.experiment(good_theory_id, n_experiments)
+        n_failures = n_experiments - n_success
+        return good_theory_id, n_success, n_failures
+
+    def update(self, theory_index, n_success, n_failures):
+        if theory_index != good_theory_id:
+            pass
+        else:
+            uncertainty = self.bandit.uncertainty
+            self.credences = 1 / (
+                1
+                + (1 - self.credences)
+                * (
+                    ((0.5 - uncertainty) / (0.5 + uncertainty))
+                    ** (n_success - n_failures)
+                )
+                / self.credences
+            )
