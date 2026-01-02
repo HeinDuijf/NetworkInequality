@@ -12,7 +12,7 @@ import numpy.random as rd
 from scipy.stats import beta
 from tqdm.auto import tqdm
 
-from agents import Bandit, BetaAgent
+from agents import Bandit, BayesAgent, BetaAgent
 
 
 class Model:
@@ -41,6 +41,7 @@ class Model:
         self,
         network: nx.DiGraph | nx.Graph,
         n_experiments: int,
+        agent_type: str = "beta",
         uncertainty: float = 0.001,
         tolerance: float | None = 5 * 1e-03,
         histories=False,
@@ -51,21 +52,31 @@ class Model:
         **kwargs
     ):
         self.network = network
+        self.agent_type = agent_type
         self.n_agents = network.number_of_nodes()
         self.directedness = nx.is_directed(network)
         # print(self.n_agents)
         self.n_experiments = n_experiments
         # else:
-        # self.seed = seed
+        self.seed = seed
         if seed is not None:
             rd.seed(seed)
         self.bandit = Bandit(uncertainty)
-        self.agents = [
-            BetaAgent(
-                id, self.bandit, histories=histories, sampling_update=sampling_update
-            )
-            for id in self.network.nodes()
-        ]
+        if agent_type == "beta":
+            self.agents = [
+                BetaAgent(
+                    id,
+                    self.bandit,
+                    histories=histories,
+                    sampling_update=sampling_update,
+                )
+                for id in self.network.nodes()
+            ]
+        elif agent_type == "bayes":
+            self.agents = [BayesAgent(id, self.bandit) for id in self.network.nodes()]
+        else:
+            raise ValueError("Agent type not recognized.")
+
         # self.init_agents_alphas_betas = "here goes the list of initial alphas and betas"
         # self.init_agents_alphas_betas= [copy.deepcopy(agent.alphas_betas) for agent in self.agents]
 
@@ -92,22 +103,53 @@ class Model:
             number_of_steps (int, optional): Number of steps in the simulation
             (it will end sooner if the stop condition is met). Defaults to 10**4."""
 
-        def stop_condition(credences_prior, credences_post) -> bool:
+        def stop_condition() -> bool:  # credences_prior, credences_post) -> bool:
             # the tolerance is too tight, originally: rtol=1e-05, atol=1e-08
+            if self.agent_type == "bayes":
+                credences = np.array([a.credences for a in self.agents])
+                return all(credences <= 0.5) or all(credences > 0.99)
+
             return False
-            return np.allclose(
-                credences_prior,
-                credences_post,
-                rtol=self.tolerance,
-                atol=self.tolerance,
-            )
+            # return np.allclose(
+            #     credences_prior,
+            #     credences_post,
+            #     rtol=self.tolerance,
+            #     atol=self.tolerance,
+            # )
 
         def determine_conclusion() -> float:
             # Count how many pairs have the second coordinate larger than the first
             # (second coordinate is the second theory)
-            credences = np.array([agent.credences for agent in self.agents])
-            counts = np.sum([pair[1] > pair[0] for pair in credences])
-            return counts / len(credences)  # (second_coordinates > 0.5).mean()
+            if self.agent_type == "beta":
+                credences = np.array([agent.credences for agent in self.agents])
+                counts = np.sum([pair[1] > pair[0] for pair in credences])
+                share_correct = counts / len(credences)
+                return share_correct
+            elif self.agent_type == "bayes":
+                credences = np.array([agent.credences for agent in self.agents])
+                counts = np.sum(credences > 0.99)
+                return counts / len(credences)  # type: ignore
+            else:
+                raise ValueError("Agent type not recognized.")
+            # return counts / len(credences)  # (second_coordinates > 0.5).mean()
+
+        def determine_conclusion_core() -> float:
+            # Count how many pairs have the second coordinate larger than the first
+            # (second coordinate is the second theory)
+            core_agents = [
+                agent for agent in self.agents if self.network.in_degree(agent.id) > 1
+            ]
+            if self.agent_type == "beta":
+                credences = np.array([agent.credences for agent in core_agents])
+                counts = np.sum([pair[1] > pair[0] for pair in credences])
+                share_correct = counts / len(credences)
+                return share_correct
+            elif self.agent_type == "bayes":
+                credences = np.array([agent.credences for agent in core_agents])
+                counts = np.sum(credences > 0.99)
+                return counts / len(credences)  # type: ignore
+            else:
+                raise ValueError("Agent type not recognized.")
 
         iterable_n_steps = range(n_steps)
 
@@ -116,40 +158,42 @@ class Model:
 
         for _ in iterable_n_steps:
             # Lots of if elses but oh well
-            if self.variance_stopping:
-                betas_prior = np.array([agent.alphas_betas for agent in self.agents])
-                # mv_prior = np.array([beta.stats(prior[0], prior[1], moments='mv') for
-                # prior in betas_prior])
-                mv_prior = np.array(
-                    [
-                        [
-                            beta.stats(prior[0][0], prior[0][1], moments="mv"),
-                            beta.stats(prior[1][0], prior[1][1], moments="mv"),
-                        ]
-                        for prior in betas_prior
-                    ]
-                )
-            else:
-                credences_prior = np.array([agent.credences for agent in self.agents])
+            # if self.variance_stopping:
+            #     betas_prior = np.array([agent.alphas_betas for agent in self.agents])
+            #     # mv_prior = np.array([beta.stats(prior[0], prior[1], moments='mv') for
+            #     # prior in betas_prior])
+            #     mv_prior = np.array(
+            #         [
+            #             [
+            #                 beta.stats(prior[0][0], prior[0][1], moments="mv"),
+            #                 beta.stats(prior[1][0], prior[1][1], moments="mv"),
+            #             ]
+            #             for prior in betas_prior
+            #         ]
+            #     )
+            # else:
+            #     credences_prior = np.array([agent.credences for agent in self.agents])
 
             self.step()
 
-            if self.variance_stopping:
-                betas_post = np.array([agent.alphas_betas for agent in self.agents])
-                # mv_post = np.array([beta.stats(post[0], post[1], moments='mv') for post in betas_post])
-                mv_post = np.array(
-                    [
-                        [
-                            beta.stats(post[0][0], post[0][1], moments="mv"),
-                            beta.stats(post[1][0], post[1][1], moments="mv"),
-                        ]
-                        for post in betas_post
-                    ]
-                )
+            # if self.variance_stopping:
+            #     betas_post = np.array([agent.alphas_betas for agent in self.agents])
+            #     # mv_post = np.array([beta.stats(post[0], post[1], moments='mv') for post in betas_post])
+            #     mv_post = np.array(
+            #         [
+            #             [
+            #                 beta.stats(post[0][0], post[0][1], moments="mv"),
+            #                 beta.stats(post[1][0], post[1][1], moments="mv"),
+            #             ]
+            #             for post in betas_post
+            #         ]
+            #     )
 
             # we need the credences post regardless of the variance stopping condition
-            credences_post = np.array([agent.credences for agent in self.agents])
+            # credences_post = np.array([agent.credences for agent in self.agents])
 
+            if stop_condition():
+                break
             # if self.step_counter > 1000 and self.step_counter % 100 == 0:
             #     if self.prob_some_agent_switches() < 0.01:
             #         break
@@ -163,6 +207,7 @@ class Model:
 
         # We add the conclusion at the end of the simulation
         self.conclusion = determine_conclusion()
+        self.conclusion_core = determine_conclusion_core()
 
         if self.histories:
             self.add_agents_history()
@@ -201,8 +246,8 @@ class Model:
                 theories_exp_results[theory_index][1] += results[2]  # n_failures
 
             # update
-            agent.beta_update(0, theories_exp_results[0][0], theories_exp_results[0][1])
-            agent.beta_update(1, theories_exp_results[1][0], theories_exp_results[1][1])
+            agent.update(0, theories_exp_results[0][0], theories_exp_results[0][1])
+            agent.update(1, theories_exp_results[1][0], theories_exp_results[1][1])
 
     def add_agents_history(self):
         self.agent_histories = [agent.credences_history for agent in self.agents]
