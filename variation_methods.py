@@ -12,7 +12,7 @@ def _sample_edge_from_degree_dist(
     outdegrees: dict,
     attempts: int = 10,
 ) -> tuple | None:
-    """Sample a new edge based on degree distribution weights."""
+    """Sample a new edge based on degree distribution weights. Note: may return None."""
     out_weights = [outdegrees[node] for node in nodes]
     if all(w == 0 for w in out_weights):
         out_weights = np.ones(len(nodes))
@@ -42,7 +42,7 @@ def _sample_edge_from_degree_dist(
 
 
 def _remove_edge_avoiding_isolates(graph: nx.DiGraph) -> nx.DiGraph:
-    """Remove a random edge while avoiding creating isolated nodes."""
+    """Remove one random edge while avoiding creating isolated nodes."""
     graph_dummy = copy.deepcopy(graph)
     degree_1_nodes = [
         node
@@ -67,7 +67,7 @@ def _update_clustering(
     """
     Incrementally update clustering coefficients after adding new_edge.
 
-    The key insight: when edge (u, v) is added, the affected nodes are:
+    The key: when edge (u, v) is added, the affected nodes are:
     1. u and v themselves (their degree changed)
     2. all neighbors of u (because they now potentially have a new
        triangle if they're also connected to v)
@@ -156,7 +156,7 @@ def generate_network_variant(
         num_edges_to_remove = min(n_edges, variant.number_of_edges())
         for _ in range(num_edges_to_remove):
             variant = _remove_edge_avoiding_isolates(variant)
-        # Recompute clustering after edge removal since this is less frequent
+        # Recompute clustering after edge removal
         clustering_dict = nx.clustering(variant)
         clustering_sum = sum(clustering_dict.values())
 
